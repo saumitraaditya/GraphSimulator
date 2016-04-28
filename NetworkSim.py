@@ -58,8 +58,10 @@ def randomSnip(network,out_degree_limit,save_as=None):
         out_edges=[]
         for edge in vertex.out_edges():
             out_edges.append(edge)
+        out_edges = filter(lambda e:edge_prop_random_snip[e]==False,out_edges)
+        already_marked=vertex.out_degree-len(out_edges)
         if (vertex.out_degree()>out_degree_limit):
-            num_edges_to_trim=vertex.out_degree()-out_degree_limit
+            num_edges_to_trim=(vertex.out_degree()-out_degree_limit)-already_marked
             # randomly select a list of vertices to whom edges will be trimmed
             snip_list=random.sample(out_edges,num_edges_to_trim)
             for e in snip_list:
@@ -157,14 +159,21 @@ def prioritize_edges(network,save_as=None):
         source=network.vertex_index[vertex]
         for neighbor,priority in rank_list[vertex]:
             edge_priority[network.edge(source,neighbor)]+=priority
-    print edge_priority[network.edge(network.vertex_index[0],network.vertex_index[10])]
-    print edge_priority[network.edge(network.vertex_index[9],network.vertex_index[0])]
     for vertex in network.vertices():
         vertex_neighbors=[network.vertex_index[v] for v in vertex.out_neighbours()]
         for neighbor,priority in rank_list[vertex]:
             for dst in set(reachability_from[vertex][neighbor]).intersection(vertex_neighbors) :
                 edge_priority[network.edge(neighbor,dst)]+=priority*(.25)+1.0
-                print edge_priority[network.edge(network.vertex_index[0],network.vertex_index[10])]
+        # every vertex nominates two of it's edges to have maximum priority
+        # to prevent partiotioning, especially in the case of nodes that have low degrees
+        # as edges to them will be treated unfavorably by other nodes
+        if (vertex.out_degree()>0):
+            if (vertex.out_degree()>1):
+                forver_neighbors=random.sample(rank_list[vertex],2)
+                for neighbor,priority in forver_neighbors:
+                    edge_priority[network.edge(network.vertex_index[vertex],neighbor)]=float("inf")
+            else:
+                edge_priority[network.edge(network.vertex_index[vertex],rank_list[vertex][0][0])]=float("inf")
 
     network.edge_properties["priority"]=edge_priority
     if (save_as!=None):
@@ -179,30 +188,46 @@ def snip_on_priority(network,edge_limit,save_as):
     edge_priority=network.edge_properties["priority"]
     for vertex in network.vertices():
         if (vertex.out_degree()>edge_limit):
+            out_edges=[]
+            for edge in vertex.out_edges():
+                out_edges.append(edge)
+                out_edges = filter(lambda e:edge_prop_priority_snip[e]==False,out_edges)
+                already_marked=vertex.out_degree-len(out_edges)
             # get priority of all out going edges and sort it
             out_edges=[]
             for edge in vertex.out_edges():
                 out_edges.append([edge,edge_priority[edge]])
             out_edges=sorted(out_edges,key=itemgetter(1))
-            snip_count=vertex.out_degree()-edge_limit
+            snip_count=vertex.out_degree()-edge_limit-already_marked
             for snip_edge in out_edges[0:snip_count]:
                  edge_prop_priority_snip[snip_edge[0]]=False
     network.edge_properties["PrioritySnip"] = edge_prop_priority_snip
     if (save_as!=None):
         network.save(save_as)
 
-def compare_connectivity(original_graph,modified_graph):
+def compare_connectivity(original_graph,modified_graph,hop_limit=2,save_as=None):
     '''We have to compare before and after conectivity in this method
     i.e. for example - for a given vertex how many of the original
     neighbors are still within 2 hop reach after trimming.
     We count the unreachability for every node and report it.'''
-    for v in modified_graph.vertices():
-        neighbours=original_graph.vertex(modified_graph.vertex_index[v]).out_neighbours()
-        neighbor_index=[]
-        for neighbor in neighbours:
-            neighbor_index.append(modified_graph.vertex_index[neighbor])
-        # check if this neighbor is still reachable.
-        pass
+    v_prop_unreachability=modified_graph.new_vertex_property("long")
+    for v in original_graph.vertices():
+        vert_index=original_graph.vertex_index[v]
+        unreachable_counter=0
+        for neighbor in v.out_neighbours():
+            neighbor_index=original_graph.vertex_index[neighbor]
+            dist=graph_tool.topology.shortest_distance(modified_graph,modified_graph.vertex(vert_index),modified_graph.vertex(neighbor_index))
+            if(dist>hop_limit):
+                unreachable_counter+=1
+        v_prop_unreachability[modified_graph.vertex(vert_index)]=unreachable_counter
+    modified_graph.vertex_properties["unreachability"] = v_prop_unreachability
+    # save the graph
+    if (save_as!=None):
+        modified_graph.save(save_as)
+
+
+
+
 
 
 if __name__=='__main__':
@@ -216,9 +241,13 @@ if __name__=='__main__':
     #     src,dst=line.split("\n")[0].split(",")
     #     network.add_edge(network.vertex(src),network.vertex(dst))
     # mutual_snip(network,5,"sample_graph.xml.gz")
-    network=load_graph(input_filename)
+    # network=load_graph(input_filename)
     # mutual_snip(network,5,"gowalla_with_mutual_snip.xml.gz")
-    prioritize_edges(network)
-    #snip_on_priority(network,50,"sample_graph_priority_filter.xml.gz")
+    # prioritize_edges(network,save_as="nx_1000_with_updated_edge_priorities.xml.gz")
+    # snip_on_priority(network,50,"nx_1000_with_updated_priority_snip.xml.gz")
+    original_graph=load_graph(sys.argv[1])
+    modified_graph=load_graph(sys.argv[2])
+    modified_graph=GraphView(modified_graph,efilt=modified_graph.edge_properties["PrioritySnip"])
+    compare_connectivity(original_graph,modified_graph,hop_limit=2,save_as="nx1000_unreachabilityAfterPSnip.xml.gz")
 
 
