@@ -205,7 +205,7 @@ def snip_on_priority(network,edge_limit,save_as):
     if (save_as!=None):
         network.save(save_as)
 
-def compare_connectivity(original_graph,modified_graph,hop_limit=2,save_as=None):
+def compare_connectivity(original_graph,modified_graph,save_as=None):
     '''We have to compare before and after conectivity in this method
     i.e. for example - for a given vertex how many of the original
     neighbors are still within 2 hop reach after trimming.
@@ -217,7 +217,7 @@ def compare_connectivity(original_graph,modified_graph,hop_limit=2,save_as=None)
         for neighbor in v.out_neighbours():
             neighbor_index=original_graph.vertex_index[neighbor]
             dist=graph_tool.topology.shortest_distance(modified_graph,modified_graph.vertex(vert_index),modified_graph.vertex(neighbor_index))
-            if(dist>hop_limit):
+            if(dist>2):
                 unreachable_counter+=1
         v_prop_unreachability[modified_graph.vertex(vert_index)]=unreachable_counter
     modified_graph.vertex_properties["unreachability"] = v_prop_unreachability
@@ -248,6 +248,4 @@ if __name__=='__main__':
     original_graph=load_graph(sys.argv[1])
     modified_graph=load_graph(sys.argv[2])
     modified_graph=GraphView(modified_graph,efilt=modified_graph.edge_properties["PrioritySnip"])
-    compare_connectivity(original_graph,modified_graph,hop_limit=2,save_as="nx1000_unreachabilityAfterPSnip.xml.gz")
-
-
+    compare_connectivity(original_graph,modified_graph,save_as="nx1000_unreachabilityAfterPSnip.xml.gz")
