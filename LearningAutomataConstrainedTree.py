@@ -178,7 +178,7 @@ class LACT:
         self.displaySpanningTree()
         print("--------------------------------")
         print(self.CostTree)
-        print("################################")
+        print("--------------------------------")
         # after every iteration all automatons should be refreshed
         for vert in self.AutomatonTable.keys():
             self.AutomatonTable[vert].refresh()
