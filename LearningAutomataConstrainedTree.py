@@ -18,6 +18,10 @@ class automaton:
         for e in self.vert.out_edges():
             self.action_set.append([e,1.0/self.vert.out_degree(),True])
 
+    def displayActionSet(self):
+        for action in self.action_set:
+            print("%s--%s, %f,%f,%s\t"%(action[0].source(),action[0].target(),action[1],self.edge_costs[action[0]],action[2]))
+
     # Edges that connect to a vertex already
     # on the tree should be set to False
     # for the current iteration
@@ -56,11 +60,11 @@ class automaton:
 
     def validateActionSet(self,degree_constraint,root=False):
         if (root==True):
-            if (self.numActionsTaken>degree_constraint):
+            if (self.numActionsTaken>=degree_constraint):
                 self.active=False
                 return False
         else:
-            if (self.numActionsTaken > degree_constraint - 1):
+            if (self.numActionsTaken >= degree_constraint - 1):
                 self.active=False
                 return False
         for action in self.action_set:
@@ -78,7 +82,6 @@ class automaton:
         choice=random.random()
         selected_triplet=None
         sum=0
-        # print(self.action_set)
         for triplet in self.action_set:
             if (triplet[2]==False):
                 continue
@@ -86,7 +89,7 @@ class automaton:
             if (sum>choice):
                 selected_triplet=triplet
                 # update probability of this triplet if action is associated with lowest cost edge
-                if (self.edge_costs[triplet[0]]<self.dynamicCost):
+                if (self.edge_costs[triplet[0]]<=self.dynamicCost):
                     self.updateActionSet(triplet[0])
                     self.dynamicCost=self.edge_costs[triplet[0]]
                 break
@@ -116,16 +119,25 @@ class LACT:
         self.SpanningTree=[]
         self.CostTree=0
 
+    def displaySpanningTree(self):
+        display_string=""
+        for e in self.SpanningTree:
+            display_string+=str([self.G.vertex_index[e.source()],self.G.vertex_index[e.target()]])
+            display_string+=" "
+        print display_string
+
     # Iteration results in a DegreeConstrainedspanningTree
     def start(self):
-        start_vert=self.G.vertex(random.SystemRandom().randint(0,self.G.num_vertices()-1))
-        print(start_vert)
+        # start_vert=self.G.vertex(random.SystemRandom().randint(0,self.G.num_vertices()-1))
+        start_vert=self.G.vertex(0)
         current_automaton=self.AutomatonTable[start_vert]
         # reset spanning tree list and cost
         self.SpanningTree = []
         self.CostTree = 0
         verticesInTree=defaultdict(int)
         verticesInTree[start_vert]=1
+        treeTraceList=[]
+        treeTraceList.append(start_vert)
         while(len(self.SpanningTree)!=self.G.num_vertices()-1):
             # update actionset to avoid cycle
             current_automaton.cycle_avoidance(verticesInTree)
@@ -134,28 +146,49 @@ class LACT:
                 self.SpanningTree.append(selected_edge)
                 self.CostTree+=edge_cost
                 verticesInTree[invited_vertex]=1
+                treeTraceList.append(invited_vertex)
             # if previous automaton is not active or it has no more actions to select
             # trace back for a active automaton with a non-empty actions set
             else:
                 chosen_vert=None
-                for v in verticesInTree.keys():
+                for v in reversed(treeTraceList):
                     self.AutomatonTable[v].cycle_avoidance(verticesInTree)
                     if (self.AutomatonTable[v].validateActionSet(self.MaxDeg)==True):
                         chosen_vert=v
                         current_automaton=self.AutomatonTable[v]
                         break
+                # if no vertex is active or have no enabled actions exit
+                if (chosen_vert==None):
+                    break
                 invited_vertex, selected_edge, edge_cost = current_automaton.selectAction()
                 self.SpanningTree.append(selected_edge)
                 self.CostTree += edge_cost
                 verticesInTree[invited_vertex] = 1
+                treeTraceList.append(invited_vertex)
             current_automaton = self.AutomatonTable[invited_vertex]
-            print(invited_vertex)
         # # print the results from iteration
         # for v in verticesInTree.keys():
         #     print self.G.vertex_index[v]
-        for edge in self.SpanningTree:
-            print edge
+        # for edge in self.SpanningTree:
+        #     print edge
+        for vert in self.AutomatonTable.keys():
+            print(self.AutomatonTable[vert].dynamicCost)
+            self.AutomatonTable[vert].displayActionSet()
+        print("--------------------------------")
+        self.displaySpanningTree()
+        print("--------------------------------")
+        print(self.CostTree)
+        print("################################")
+        # after every iteration all automatons should be refreshed
+        for vert in self.AutomatonTable.keys():
+            self.AutomatonTable[vert].refresh()
+
+    def iterateTree(self):
+        counter=0
+        while(counter<20):
+            self.start()
+            counter+=1
 
 if __name__=="__main__":
     lact = LACT("sample_graph_with_edge_costs.xml.gz",4,.09)
-    lact.start()
+    lact.iterateTree()
