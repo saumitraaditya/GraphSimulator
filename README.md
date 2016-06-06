@@ -1,2 +1,2 @@
 # GraphSimulator
-GraphToolSimulationSourceRepoistory
+GraphToolSimulationSourceRepository
