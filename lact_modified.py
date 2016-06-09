@@ -4,13 +4,14 @@ from operator import itemgetter
 from collections import defaultdict
 
 class automaton:
-    def __init__(self,graph_object,vert_object,adj_list,reward):
+    def __init__(self,graph_object,vert_object,adj_list,edge_isDCST,reward):
         self.vert=vert_object
         self.vIndex=graph_object.vertex_index[self.vert]
         #every automaton maintains an action_set, which is set of incident edges
         #each action is denoted as a triplet
         #<E,probability,valid_for_current_iteration>
         self.edge_costs=graph_object.edge_properties["edge_cost"]
+        self.edge_isDCST = edge_isDCST
         self.adj_list = adj_list
         self.action_set=[]
         self.active=True
@@ -74,13 +75,24 @@ class automaton:
                 return True
         return False
 
+     # called after cycle_avoidance has been called sets probability of actions associated with edges that
+    # have been selected as part of DCST by other node high, so that they have a better chance of being selected
+    def biasActionSet(self):
+        for triplet in self.action_set:
+            if (triplet[2]==False):
+                continue
+            else:
+                if (self.edge_isDCST[triplet[0]]):
+                    triplet[1]= 1
+
     # Select an action based on the probability distribution
     # if the selected edge is less than dynamic cost of automaton
     # reward the action,update probability and rescale the probabilities
     def selectAction(self):
         self.scaleActionSet(True)
         # sort action set in descending order of probabilities
-        self.action_set=sorted(self.action_set,key=itemgetter(1))
+        self.biasActionSet()
+        self.action_set=sorted(self.action_set,key=itemgetter(1),reverse=True)
         choice=random.random()
         selected_triplet=None
         sum=0
@@ -112,14 +124,14 @@ class automaton:
             triplet[2]=True
 
 class LACT:
-    def __init__(self,graphObject,adj_list,degree_constraint,reward):
+    def __init__(self,graphObject,adj_list,edge_isDCST,degree_constraint,reward):
         # initialize automatons, one at every vertex
         # adj_list is the LocalGraphView
         self.G = graphObject
         self.AutomatonTable={}
         self.adj_list = adj_list
         for v_index in self.adj_list.keys():
-            self.AutomatonTable[self.G.vertex(v_index)]=automaton(self.G,self.G.vertex(v_index),self.adj_list,reward)
+            self.AutomatonTable[self.G.vertex(v_index)]=automaton(self.G,self.G.vertex(v_index),self.adj_list,edge_isDCST,reward)
         self.MaxDeg=degree_constraint
         self.SpanningTree=[]
         self.CostTree=0
@@ -139,9 +151,9 @@ class LACT:
         print display_string
 
     # Iteration results in a DegreeConstrainedspanningTree
-    def start(self):
+    def start(self,curr_vert_index):
         # start_vert=self.G.vertex(random.SystemRandom().randint(0,self.G.num_vertices()-1))
-        start_vert=self.G.vertex(random.choice(self.adj_list.keys()))
+        start_vert = curr_vert_index #self.G.vertex(random.choice(self.adj_list.keys()))
         current_automaton=self.AutomatonTable[start_vert]
         # reset spanning tree list and cost
         self.SpanningTree = []
@@ -173,6 +185,7 @@ class LACT:
                         break
                 # if no vertex is active or have no enabled actions exit
                 if (chosen_vert==None):
+                    print("DCST is not possible for this Vertex")
                     break
                 invited_vertex, selected_edge, edge_cost,prob = current_automaton.selectAction()
                 self.SpanningTree.append(selected_edge)
@@ -202,10 +215,10 @@ class LACT:
             self.AutomatonTable[vert].refresh()
         return action_probability
 
-    def iterateTree(self):
+    def iterateTree(self,curr_vert_index):
         counter=0
         while(counter<1):
-            self.start()
+            self.start(curr_vert_index)
             counter+=1
         # self.displaySpanningTree(BestTree=True)
         # print(self.MinTreeCost)
@@ -219,6 +232,7 @@ class LACT:
         #             flag=False
         #             break
         #     action_prob=self.start()
+
 
 
 
