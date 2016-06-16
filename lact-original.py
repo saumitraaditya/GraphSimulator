@@ -32,7 +32,7 @@ class automaton:
                 triplet[2]=False
 
     # Scale action set if second argument is True else Rescale
-    def scaleActionSet(self,scale):
+    def scaleActionSet(self,scale,action_sum = 0):
         sum = 0
         for triplet in self.action_set:
             if (triplet[2]==False):
@@ -48,7 +48,8 @@ class automaton:
             for triplet in self.action_set:
                 if (triplet[2] == False):
                     continue
-                triplet[1] = triplet[1] * sum
+                triplet[1] = triplet[1] * action_sum
+        return sum
 
     def updateActionSet(self,edge,reward=True):
         # update performed only for actions that are available
@@ -56,14 +57,9 @@ class automaton:
             for triplet in self.action_set:
                 if (triplet[0]==edge):
                     triplet[1]=triplet[1]+self.reward*(1-triplet[1])
-                else:
-                    if (triplet[2]==True):
-                        triplet[1]=(1-self.reward)*triplet[1]
         else:
             for triplet in self.action_set:
-                if (self.edge_costs[triplet[0]]==self.dynamicCost):
-                    continue
-                else:
+                if (triplet[0]==edge):
                     triplet[1] = (1 - self.reward) * triplet[1]
 
     def validateActionSet(self,degree_constraint,root=False):
@@ -84,7 +80,7 @@ class automaton:
     # if the selected edge is less than dynamic cost of automaton
     # reward the action,update probability and rescale the probabilities
     def selectAction(self):
-        self.scaleActionSet(True)
+        action_prob_sum = self.scaleActionSet(True)
         # sort action set in descending order of probabilities
         self.action_set = sorted(self.action_set, key=itemgetter(1), reverse=True)
         self.displayActionSet()
@@ -101,9 +97,11 @@ class automaton:
                 if (self.edge_costs[triplet[0]]<=self.dynamicCost):
                     self.updateActionSet(triplet[0])
                     self.dynamicCost=self.edge_costs[triplet[0]]
+                else:
+                    self.updateActionSet(triplet[0],reward=False)
                 break
         selected_prob = selected_triplet[1]
-        self.scaleActionSet(False)
+        self.scaleActionSet(False,action_sum=action_prob_sum)
         invited_vertex=None
         if (selected_triplet[0].source()==self.vert):
             invited_vertex=selected_triplet[0].target()
@@ -218,26 +216,26 @@ class LACT:
 
     def iterateTree(self):
         counter=0
-        while(counter<10):
-            self.start()
-            counter+=1
-            self.displaySpanningTree(BestTree=True)
-            print(self.MinTreeCost)
-        # action_prob=self.start()
-        # flag=True
-        # while (flag == True):
-        #     flag = False
+        # while(counter<10):
+        #     self.start()
         #     counter+=1
-        #     for p in action_prob:
-        #         if (p < .8):
-        #             flag = True
-        #             break  # get out of for.
-        #     if (counter > 500):
-        #         flag = False
-        #     action_prob=self.start()
-        # print ("Counter:{0}".format(counter))
+        #     self.displaySpanningTree(BestTree=True)
+        #     print(self.MinTreeCost)
+        action_prob=self.start()
+        flag=True
+        while (flag == True):
+            flag = False
+            counter+=1
+            for p in action_prob:
+                if (p < .7):
+                    flag = True
+                    break  # get out of for.
+            if (counter > 500):
+                flag = False
+            action_prob=self.start()
+        print ("Counter:{0}".format(counter))
 
 
 if __name__=="__main__":
-    lact = LACT("sample_graph_with_edge_costs.xml.gz",4,.1)
+    lact = LACT("sample_graph_with_edge_costs.xml.gz",4,.25)
     lact.iterateTree()
