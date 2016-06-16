@@ -91,7 +91,7 @@ class automaton:
     def selectAction(self):
         self.scaleActionSet(True)
         # sort action set in descending order of probabilities
-        self.biasActionSet()
+        #self.biasActionSet()
         self.action_set=sorted(self.action_set,key=itemgetter(1),reverse=True)
         choice=random.random()
         selected_triplet=None
@@ -103,9 +103,9 @@ class automaton:
             if (sum>choice):
                 selected_triplet=triplet
                 # update probability of this triplet if action is associated with lowest cost edge
-                if (self.edge_costs[triplet[0]]<=self.dynamicCost):
-                    self.updateActionSet(triplet[0])
-                    self.dynamicCost=self.edge_costs[triplet[0]]
+                if (self.edge_costs[selected_triplet[0]]<=self.dynamicCost):
+                    self.updateActionSet(selected_triplet[0])
+                    self.dynamicCost=self.edge_costs[selected_triplet[0]]
                 break
         selected_prob = selected_triplet[1]
         self.scaleActionSet(False)
@@ -217,7 +217,7 @@ class LACT:
 
     def iterateTree(self,curr_vert_index):
         counter=0
-        while(counter<1):
+        while(counter<20):
             self.start(curr_vert_index)
             counter+=1
         # self.displaySpanningTree(BestTree=True)
