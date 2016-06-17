@@ -4,26 +4,67 @@ from operator import itemgetter
 from collections import defaultdict
 
 class automaton:
-    def __init__(self,graph_object,vert_object,adj_list,edge_isDCST,reward):
+    def __init__(self,graph_object,vert_object,adj_list,edge_isDCST,reward,degree_constraint):
         self.vert=vert_object
         self.vIndex=graph_object.vertex_index[self.vert]
         #every automaton maintains an action_set, which is set of incident edges
         #each action is denoted as a triplet
         #<E,probability,valid_for_current_iteration>
+        self.graph_object = graph_object
         self.edge_costs=graph_object.edge_properties["edge_cost"]
+        self.num_links=graph_object.vertex_properties["num_links"]
         self.edge_isDCST = edge_isDCST
         self.adj_list = adj_list
         self.action_set=[]
         self.active=True
         self.numActionsTaken=0
         self.reward=reward
+        self.degree_constraint = degree_constraint
         self.dynamicCost=999999.00 # initial value of minimum Cost incident edge seen till now.
+        # Local cost view
+        self.cost_view = {}
+        # Calculate minimum cost from the snapshot
+        self.min_initial_edge_cost = 9999999.00
+        for src,dst in self.adj_list[self.vIndex]:
+            link_cost = self.edge_costs[graph_object.edge(src,dst)]
+            if (link_cost <= self.min_initial_edge_cost):
+                self.min_initial_edge_cost = link_cost
+
+        # populate local cost_view
+        sum_costs = 0.0
+        for src, dst in self.adj_list[self.vIndex]:
+            self.assign_costs(src,dst)
+            sum_costs += self.cost_view[graph_object.edge(src,dst)]
+
         for src,dst in self.adj_list[self.vIndex]:#-------------------Have to use adjacency list representation here------------------------------------------------------
-            self.action_set.append([graph_object.edge(src,dst),1.0/len(self.adj_list[self.vIndex]),True])
+            self.action_set.append([graph_object.edge(src,dst),sum_costs/self.cost_view[graph_object.edge(src,dst)],True])
+
+    # During initialization every automaton assigns cost to links based on the SNAPSHOT,
+    # which are than used to assign probabilities.
+    def assign_costs(self,src,dst):
+        link = self.graph_object.edge(src,dst)
+        src_vert = self.graph_object.vertex(src)
+        dst_vert = self.graph_object.vertex(dst)
+        if (self.edge_isDCST[link]): #and self.num_links[src]<= self.degree_constraint and self.num_links[dst]<= self.degree_constraint):
+            self.cost_view[link ] = random.uniform(10.0,self.min_initial_edge_cost/2 )
+        else:
+            if (self.num_links[src_vert]<= self.degree_constraint and self.num_links[dst_vert]<= self.degree_constraint):
+                self.cost_view[link] = self.edge_costs[self.graph_object.edge(src_vert,dst_vert)]
+            else:
+                # calculate excess links
+                excess = 0
+                if (self.num_links[src_vert] > self.degree_constraint):
+                    excess += self.num_links[src_vert] - self.degree_constraint
+                if (self.num_links[dst_vert] > self.degree_constraint):
+                    excess += self.num_links[dst_vert] - self.degree_constraint
+                excess = float(excess)
+                self.cost_view[link] = (1 + (excess/self.degree_constraint)) * self.edge_costs[self.graph_object.edge(src_vert,dst_vert)]
+
+
 
     def displayActionSet(self):
         for action in self.action_set:
-            print("%s--%s, %f,%f,%s\t"%(action[0].source(),action[0].target(),action[1],self.edge_costs[action[0]],action[2]))
+            print("%s--%s, %f,%f,%s\t"%(action[0].source(),action[0].target(),action[1],self.cost_view[action[0]],action[2]))
 
     # Edges that connect to a vertex already
     # on the tree should be set to False
@@ -34,7 +75,7 @@ class automaton:
                 triplet[2]=False
 
     # Scale action set if second argument is True else Rescale
-    def scaleActionSet(self,scale):
+    def scaleActionSet(self,scale, action_sum = 0):
         sum = 0
         for triplet in self.action_set:
             if (triplet[2]==False):
@@ -50,16 +91,20 @@ class automaton:
             for triplet in self.action_set:
                 if (triplet[2] == False):
                     continue
-                triplet[1] = triplet[1] * sum
+                triplet[1] = triplet[1] * action_sum
+        return sum
 
-    def updateActionSet(self,edge):
+    def updateActionSet(self,edge,reward = True):
         # update performed only for actions that are available
-        for triplet in self.action_set:
-            if (triplet[0]==edge):
-                triplet[1]=triplet[1]+self.reward*(1-triplet[1])
-            else:
-                if (triplet[2]==True):
-                    triplet[1]=(1-self.reward)*triplet[1]
+        if (reward == True):
+            for triplet in self.action_set:
+                if (triplet[0]==edge):
+                    triplet[1]=triplet[1]+self.reward*(1-triplet[1])
+        else:
+            for triplet in self.action_set:
+                if (triplet[0] == edge):
+                    triplet[1] = ( 1 - self.reward) * triplet[1]
+
 
     def validateActionSet(self,degree_constraint,root=False):
         if (root==True):
@@ -89,7 +134,7 @@ class automaton:
     # if the selected edge is less than dynamic cost of automaton
     # reward the action,update probability and rescale the probabilities
     def selectAction(self):
-        self.scaleActionSet(True)
+        action_prob_sum = self.scaleActionSet(True)
         # sort action set in descending order of probabilities
         #self.biasActionSet()
         self.action_set=sorted(self.action_set,key=itemgetter(1),reverse=True)
@@ -103,19 +148,22 @@ class automaton:
             if (sum>choice):
                 selected_triplet=triplet
                 # update probability of this triplet if action is associated with lowest cost edge
-                if (self.edge_costs[selected_triplet[0]]<=self.dynamicCost):
+                if (self.cost_view[selected_triplet[0]]<=self.dynamicCost):
                     self.updateActionSet(selected_triplet[0])
-                    self.dynamicCost=self.edge_costs[selected_triplet[0]]
+                    self.dynamicCost=self.cost_view[selected_triplet[0]]
+                else:
+                    self.updateActionSet(selected_triplet[0],reward = False)
+                    pass
                 break
         selected_prob = selected_triplet[1]
-        self.scaleActionSet(False)
+        self.scaleActionSet(False, action_sum = action_prob_sum)
         invited_vertex=None
         if (selected_triplet[0].source()==self.vert):
             invited_vertex=selected_triplet[0].target()
         else:
             invited_vertex=selected_triplet[0].source()
         self.numActionsTaken += 1
-        return [invited_vertex,selected_triplet[0],self.edge_costs[selected_triplet[0]],selected_prob]
+        return [invited_vertex,selected_triplet[0],self.cost_view[selected_triplet[0]],selected_prob]
     # called our every iteration,
     # resets numActionsTaken, enables all disabled actions
     def refresh(self):
@@ -131,12 +179,13 @@ class LACT:
         self.AutomatonTable={}
         self.adj_list = adj_list
         for v_index in self.adj_list.keys():
-            self.AutomatonTable[self.G.vertex(v_index)]=automaton(self.G,self.G.vertex(v_index),self.adj_list,edge_isDCST,reward)
+            self.AutomatonTable[self.G.vertex(v_index)]=automaton(self.G,self.G.vertex(v_index),self.adj_list,edge_isDCST,reward,degree_constraint)
         self.MaxDeg=degree_constraint
         self.SpanningTree=[]
         self.CostTree=0
         self.BestTree=None
         self.MinTreeCost=999999999
+
 
     def displaySpanningTree(self,BestTree=False):
         display_string=""
@@ -217,7 +266,7 @@ class LACT:
 
     def iterateTree(self,curr_vert_index):
         counter=0
-        while(counter<20):
+        while(counter<100):
             self.start(curr_vert_index)
             counter+=1
         # self.displaySpanningTree(BestTree=True)
