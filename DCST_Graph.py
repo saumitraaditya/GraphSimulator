@@ -12,14 +12,18 @@ class DCST:
         # new edge property, for filtering edges
         edge_isDCST = self.G.new_edge_property("bool", False)
         dcst_edges = self.G.new_vertex_property("object")
+        num_links = self.G.new_vertex_property("int",0)
+        self.G.vertex_properties["num_links"] = num_links
         for v in self.G.vertices():
             # print results on console
             curr_vert_index = self.G.vertex_index[v]
             adj_list = self.G.vertex_properties["adj_list"][v]
-            lact = LACT(self.G,adj_list,edge_isDCST,5,.09)
+            lact = LACT(self.G,adj_list,edge_isDCST,5,.2)
             dcst = lact.iterateTree(curr_vert_index)
             for e in dcst:
-                edge_isDCST[e]=True
+                edge_isDCST[e] = True
+                self.G.vertex_properties["num_links"][e.source()]+=1
+                self.G.vertex_properties["num_links"][e.target()] += 1
             print(str(lact.MinTreeCost)+" :: "+str(curr_vert_index))
             print("-----------------------------------")
             lact.displaySpanningTree(BestTree=True)
