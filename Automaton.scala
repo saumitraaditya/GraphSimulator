@@ -8,15 +8,23 @@ class ActionSet(action:edge,prob:Double,avbl:Boolean)
   var action_prob = prob;
   var available = avbl;
 }
+
+class selected_action(selected_edge:edge,action_probability:Double,selected_edge_cost:Double)
+{
+  val sel_edge = selected_edge;
+  val action_prob = action_probability;
+  val sel_cost = selected_edge_cost;
+}
 class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
 {
   val reward = reward_val;
   val degree_constraint = deg_constraint;
+  val id = uid;
   var dynamicCost= Double.MaxValue;
   var min_initial_action_cost = Double.MaxValue; 
   var sum_costs:Double = 0.0;
   var actionSet = new ArrayBuffer[ActionSet];
-  var numActionTaken:Int = 0;
+  var numActionsTaken:Int = 0;
   var active:Boolean = true;
   var costAction = new HashMap[edge,Double]();
   /*calculate minimum cost from the snapshot*/
@@ -51,7 +59,7 @@ class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
     }
   }
   
-  def scaleActionSet(scale:Boolean=true):Double=
+  def scaleActionSet(scale:Boolean=true,action_sum:Double=0):Double=
   {
     var sum:Double = 0;
     for (action <-actionSet)
@@ -74,7 +82,7 @@ class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
       for (action <-actionSet)
       {
         if (action.available)
-          action.action_prob = action.action_prob * sum;
+          action.action_prob = action.action_prob * action_sum;
       }
     }
     return sum;
@@ -102,12 +110,12 @@ class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
   
   def validateActionSet(root:Boolean=false):Boolean=
   {
-    if (root && numActionTaken >= degree_constraint)
+    if (root && numActionsTaken >= degree_constraint)
     {
         active = false;
         return false;    
     }
-    else if (numActionTaken >= degree_constraint-1)
+    else if (numActionsTaken >= degree_constraint-1)
     {
       active = false;
       return false;
@@ -130,7 +138,7 @@ class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
     }
   }
   
-  def selectAction()
+  def selectAction():selected_action=
   {
     val action_prob_sum = scaleActionSet(true);
     // sort action set in descending order of probabilities
@@ -138,21 +146,42 @@ class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
     var choice = scala.util.Random.nextDouble();
     var selectedAction:ActionSet = null;
     var sum:Double = 0.0;
-    for (action <- actionSet)
-    {
-      if (action.available)
-      {
-        sum = sum + action.action_prob;
-        if (sum >= choice)
+    breakable {
+        for (action <- actionSet)
         {
-          selectedAction = action;
-          break;
+          if (action.available)
+          {
+            sum = sum + action.action_prob;
+            if (sum >= choice)
+            {
+              selectedAction = action;
+              if (costAction(selectedAction.link) <= dynamicCost)
+              {
+                updateActionSet(selectedAction,true);
+                dynamicCost = costAction(selectedAction.link);
+              }
+              else
+              {
+                updateActionSet(selectedAction,false);
+              }
+              break;
+            }
+          }
         }
-      }
-    }
-    
-    
-    
+    }//breakable
+    var selected_prob = selectedAction.action_prob;
+    var selected_edge_cost = costAction(selectedAction.link);
+    scaleActionSet(false,action_sum = sum);
+    var invitedVertexID =  selectedAction.link.dst; // Ensure that it returns the destination and not self's uid.
+    numActionsTaken = numActionsTaken + 1;  
+    return new selected_action(selectedAction.link,selected_prob,selected_edge_cost);
+  }
+  
+  def refresh()
+  {
+    numActionsTaken = 0;
+    for (action <- actionSet)
+      action.available = true;
   }
   
 }
