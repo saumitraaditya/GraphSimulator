@@ -24,7 +24,7 @@ class edge(source:Int,target:Int,value:Double,trueLink:Boolean)
 class ViewSnapshot(socialView:HashMap[Int,ArrayBuffer[Int]],realView:HashMap[Int,ArrayBuffer[Int]])
 {
   var snapshot  = new HashMap [Int,ArrayBuffer[edge]]();
-  val MaxVal = Double.MaxValue;
+  val MaxVal = 10000.0;
   /* initialize snapshot-
    * 1. create storage
    * 2. populate social links
