@@ -1,149 +1,194 @@
-import akka.actor.{ActorSystem, ActorRef, Actor, Props,actorRef2Scala,PoisonPill,ActorLogging}
+
+
+/**
+ * @author sam
+ */
+import scala.collection.mutable.ArrayBuffer;
 import collection.mutable.HashMap
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.duration._
-import java.util.concurrent.TimeUnit;
+import util.control.Breaks._
 import scala.io.Source
 
 
-case object start
-case object revaluate_socialTopo
-// represents a link in the graph.
-class edge(source:Int,target:Int,value:Double,trueLink:Boolean)
+class LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
 {
-  val src = source;
-  val dst = target;
-  var cost = value;
-  var real = trueLink;
-}
-/* This class represents unified view of the neighborhood, containing all information 
- * that would be needed by the DCST algorithm to work, each invocation of MinDCST
- * would be provided with a updated snapshot that reflects the network view in the 
- * neighborhood.*/
-class ViewSnapshot(socialView:HashMap[Int,ArrayBuffer[Int]],realView:HashMap[Int,ArrayBuffer[Int]])
-{
-  var snapshot  = new HashMap [Int,ArrayBuffer[edge]]();
-  val MaxVal = 10000.0;
-  /* initialize snapshot-
-   * 1. create storage
-   * 2. populate social links
-   * 3. identify real subset
-   * 4. populate costs*/
-  for (source <- socialView.keySet)
+  var myView:ViewSnapshot = view;
+  var AutomatonTable = new HashMap[Int,Automaton]();
+  for (node_id <- myView.snapshot.keySet)
   {
-    snapshot+=(source->new ArrayBuffer[edge]())
-    for (target <- socialView(source))
-    {
-      snapshot(source)+=new edge(source,target,MaxVal/(socialView(source).size+socialView(target).size),realView(source).contains(target))
-    }
-  } 
-}
-// number of actual links to/from the node
-case class realDegree(num_links:Int)
-// Link advert method
-case class LinkAdvt(source:Int, target:Int)
-// Exchange Rosters with Friends
-case class RosterExchange(sender:Int,roster:ArrayBuffer[Int])
-/* A node is an independent network gateway*/
-class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
-{
-  /* will contain social links*/
-  var socialView = new HashMap[Int,ArrayBuffer[Int]](){ override def default(key:Int) = new ArrayBuffer[Int] }
-  /* will contain actual links, needs to be updates when new links are created by self, or information about
-   * new link created by neighbors is learnt*/
-  var realView = new HashMap[Int,ArrayBuffer[Int]](){ override def default(key:Int) = new ArrayBuffer[Int] }
-  /*Initially, node will have edges to to immediate neighbors,
-   * gradually it will learn via messaging about edges via neighbor
-   * to shared neighbors and add them */
-  socialView+=(uid->new ArrayBuffer[Int]());
-  realView+=(uid->new ArrayBuffer[Int]());
-  for (neighbor <- Roster)
-  {
-     socialView+=(neighbor->new ArrayBuffer[Int]()); // Adjacency list for neighbors
-     socialView(uid)+=neighbor; // Adjacency list for root node.
-  }    
-  def receive = 
-  {
-    // Advertisement for real links
-    case LinkAdvt(source:Int,target:Int)=>
-      {         
-            realView(source)+=target;
-      }
-    case `start`=>
-      {
-        val Asys = context.system;
-        import Asys.dispatcher;
-        Asys.scheduler.schedule(new FiniteDuration(1,SECONDS),new FiniteDuration(5,SECONDS),self,revaluate_socialTopo)
-      }
-    case `revaluate_socialTopo`=>
-      {
-        /*Simplified implementation -- send my roster to nodes in my roster.*/
-        // create a deep copy of Roster and send it across
-        val rosterCopy = Roster.clone();
-        for (neighbor <- Roster)
-        {
-          val neighborActor = "../"+neighbor.toString;
-          context.actorSelection(neighborActor) ! RosterExchange(uid,rosterCopy)   
-        }
-      }
-    case RosterExchange(sender:Int,neighborRoster:ArrayBuffer[Int])=>
-      {
-        //Initially only interested in links to shared neighbours.
-        // Add to local view a relevant link.
-        for (target<-neighborRoster)
-        {
-          if (socialView.keySet.contains(target))
-          {
-            socialView(sender)+=target;
-            System.out.println("recvd Roster msg");
-          }
-          
-        }
-      }
+    AutomatonTable+= node_id->new Automaton(node_id,myView,reward_val,deg_constraint);
   }
-}
-
-class SimulationManager(topology:ArrayBuffer[ActorRef]) extends Actor
-{  
-  def receive =
+  val MaxDeg = deg_constraint;
+  var SpanningTree = new ArrayBuffer[edge];
+  var CostTree:Double = 0.0;
+  var BestTree:ArrayBuffer[edge] = null;
+  var MinTreeCost = Double.MaxValue;
+  
+  
+  def displaySpanningTree(BestSpanningTree:Boolean=false)=
   {
-    case `start` =>
-      {
-        for (node <- topology)
-        {
-          node ! start
-        }
-      }
-  } 
-}
-
-object SmartTopology
-{
-  def main(args:Array[String])
-  {
-    if (args.length<2)
-      println("Please enter the name of Graph file.")
+    var displayString = new StringBuilder();
+    if (BestSpanningTree)
+      for (this_edge<-BestTree)
+        displayString.append(" %d-->%d ".format(this_edge.src,this_edge.dst));
     else
-    {
-      val GraphFile = args(1);
-      val actor_system = ActorSystem("SmartTopology")
-      val nodesInNetwork = new ArrayBuffer[ActorRef]();
-      // Read the file , initialize the nodes.
-      for (line <- Source.fromFile(GraphFile).getLines())
-      {
-        var roster = new ArrayBuffer[Int]();
-        val split_array = line.split(" ");
-        val src = split_array(0).toInt;
-        for (i<- 1 to split_array.length-1)
-          roster+=(split_array(i).toInt)
-        nodesInNetwork+=actor_system.actorOf(Props(new Node(src,roster)),src.toString());
-      }
-      val Manager = actor_system.actorOf(Props(new SimulationManager(nodesInNetwork)),"Manager")
-      Manager ! start;
-    }
+      for (this_edge<-SpanningTree)
+        displayString.append(" %d-->%d ".format(this_edge.src,this_edge.dst));
+    println(displayString);
   }
+  /*Invocation results in a degree constrained spanning tree*/
+  def start(curr_node_uid:Int):ArrayBuffer[Double]=
+  {
+    val start_vert = curr_node_uid;
+    var current_automaton = AutomatonTable(start_vert);
+    SpanningTree = new ArrayBuffer[edge];
+    CostTree = 0.0;
+    var verticesInTree = new HashMap[Int,Boolean]() {override def default(key:Int)= false}
+    verticesInTree+=(start_vert->true);
+    var treeTraceList = new scala.collection.mutable.Stack[Automaton];
+    treeTraceList.push(current_automaton);
+    var action_probability = new ArrayBuffer[Double]();
+    var selectedAction:selected_action = null;
+    breakable {
+        while (SpanningTree.size != myView.snapshot.keySet.size-1)
+          {
+            //update action_set to avoid cycle
+            current_automaton.cycleAvoidance(verticesInTree);
+            if (current_automaton.validateActionSet()==true)
+            {
+              selectedAction = current_automaton.selectAction();
+              SpanningTree+=(selectedAction.sel_edge);
+              println("added to spanning tree")
+              CostTree = CostTree+selectedAction.sel_cost;
+              println("updated cost of tree is "+ CostTree);
+              verticesInTree+=selectedAction.sel_edge.dst->true;
+              treeTraceList.push(AutomatonTable(selectedAction.sel_edge.dst))
+              action_probability+=selectedAction.action_prob;
+            } 
+            // if previous automaton is not active or it has no more actions to select
+            // trace back for a  active automaton with a non empty action set
+            else
+            {
+              var chosenAutomaton:Automaton = null;
+              breakable {
+                while (!treeTraceList.isEmpty)
+                {
+                  var candidateAutomaton = treeTraceList.pop();
+                  println("poppped "+ candidateAutomaton.id)
+                  candidateAutomaton.cycleAvoidance(verticesInTree);
+                  if (candidateAutomaton.validateActionSet()==true)
+                  {
+                    chosenAutomaton = candidateAutomaton;
+                    treeTraceList.push(chosenAutomaton);
+                    break;
+                  }
+                }
+              }
+              if (chosenAutomaton == null)
+              {
+                println("DCST is not possible for this vertex.");
+                break;
+              }
+              
+              selectedAction = chosenAutomaton.selectAction();
+              SpanningTree+=(selectedAction.sel_edge);
+              println("added to spanning tree")
+              CostTree = CostTree+selectedAction.sel_cost;
+              println("updated cost of tree is "+ CostTree);
+              verticesInTree+=selectedAction.sel_edge.dst->true;
+              treeTraceList.push(AutomatonTable(selectedAction.sel_edge.dst))
+              action_probability+=selectedAction.action_prob;
+            }
+            current_automaton = AutomatonTable(selectedAction.sel_edge.dst);
+          }
+    }
+    if (CostTree < MinTreeCost )
+      {
+        MinTreeCost = CostTree;
+        BestTree = SpanningTree;
+        println("minimum cost tree")
+      }
+    println(CostTree)
+    println(MinTreeCost)
+    // after every iteration all automatons should be refreshed
+    for (automatonID <- AutomatonTable.keySet)
+    {
+      AutomatonTable(automatonID).refresh()
+    }
+      // returns list of probabilities of selected actions.
+    return action_probability;
+  }
+  
+  def iterateTree(curr_vert_ID:Int):ArrayBuffer[edge]=
+  {
+    var counter = 0;
+    while (counter < 100)
+    {
+      start(curr_vert_ID);
+      counter = counter + 1;
+    }
+    return BestTree;
+  }
+  
 }
 
-
-
+object LACT_unitTest 
+{
+   def main(args:Array[String])
+  {  
+    // create a unit test for LACT and make sure it works.
+    // once this step is completed move on to inetgrate it with dcst.
+    //LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
+    var socialView = new HashMap[Int,ArrayBuffer[Int]](){ override def default(key:Int) = new ArrayBuffer[Int] }
+    var realView = new HashMap[Int,ArrayBuffer[Int]](){ override def default(key:Int) = new ArrayBuffer[Int] }
+    if (args.length<2)
+      println("Please enter the names of link desciption files.")
+    else
+      {
+        val SocialLinksFile = args(0);
+        val RealLinksFile = args(1);
+        for (line <- Source.fromFile(SocialLinksFile).getLines())
+        {
+          val split_array = line.split(" ");
+          val src = split_array(0).toInt;
+          val store = socialView(src)
+          for (i<- 1 to split_array.length-1)
+            store+=split_array(i).toInt;
+          socialView+=(src->store);
+        }
+        for (line <- Source.fromFile(RealLinksFile).getLines())
+        {
+          val split_array = line.split(" ");
+          val src = split_array(0).toInt;
+          val store = realView(src);
+          for (i<- 1 to split_array.length-1)
+            store+=split_array(i).toInt;
+          realView+=(src->store);
+        }
+      }
+    for (src <- socialView.keySet)
+      {
+        for (dst<-socialView(src))
+          println(src+"->"+dst);
+      }
+    println("--------------------------------------")
+    for (src <- realView.keySet)
+      {
+        for (dst<-realView(src))
+          println(src+"->"+dst);
+      }
+    //class ViewSnapshot(socialView:HashMap[Int,ArrayBuffer[Int]],realView:HashMap[Int,ArrayBuffer[Int]])
+     var mySnapshot = new ViewSnapshot(socialView,realView);
+     var myLact = new LACT(1,mySnapshot,.2,5);
+     for (src <- mySnapshot.snapshot.keySet)
+     {
+       for (e<-mySnapshot.snapshot(src))
+       {
+         println(e.src,e.dst,e.cost,e.real);
+       }
+     }
+    myLact.iterateTree(1);
+    myLact.displaySpanningTree(true);
+    }
+   
+}
+  
