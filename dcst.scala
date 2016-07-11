@@ -9,6 +9,9 @@ import scala.io.Source
 
 case object start
 case object revaluate_socialTopo
+case object trigger_lact
+case class RVUpdate(senderID:Int,RV:ArrayBuffer[Int])
+case class LACTupdate(senderID:Int,lact:ArrayBuffer[edge])
 // represents a link in the graph.
 class edge(source:Int,target:Int,value:Double,trueLink:Boolean)
 {
@@ -48,6 +51,8 @@ case class RosterExchange(sender:Int,roster:ArrayBuffer[Int])
 /* A node is an independent network gateway*/
 class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
 {
+  val myID = uid;
+  val degree_constraint = 5;
   /* will contain social links*/
   var socialView = new HashMap[Int,ArrayBuffer[Int]](){ override def default(key:Int) = new ArrayBuffer[Int] }
   /* will contain actual links, needs to be updates when new links are created by self, or information about
@@ -75,6 +80,7 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
         val Asys = context.system;
         import Asys.dispatcher;
         Asys.scheduler.schedule(new FiniteDuration(1,SECONDS),new FiniteDuration(5,SECONDS),self,revaluate_socialTopo)
+        Asys.scheduler.schedule(new FiniteDuration(10,SECONDS),new FiniteDuration(60,SECONDS),self,trigger_lact)
       }
     case `revaluate_socialTopo`=>
       {
@@ -87,6 +93,68 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
           context.actorSelection(neighborActor) ! RosterExchange(uid,rosterCopy)   
         }
       }
+    case `trigger_lact` =>
+      {
+        /*Take a snapshot of the views
+         * invoke LACT on the snapshot
+         * when the results are obtained
+         * update realView of self
+         * disseminate the realView and 
+         * DCST*/
+        //ViewSnapshot(socialView:HashMap[Int,ArrayBuffer[Int]],realView:HashMap[Int,ArrayBuffer[Int]])
+        var timedShot = new ViewSnapshot(socialView,realView)
+        var myLact = new LACT(1,timedShot,.2,5);
+        val currentDCST:ArrayBuffer[edge] = myLact.iterateTree(myID);
+        myLact.displaySpanningTree(true);
+        //updating realView
+        for (e<-currentDCST)
+        {
+          if (e.src == myID)
+          {
+            realView(myID)+=e.dst;
+          }
+        }
+        //disseminate realView-sendDeepCopy
+        //disseminate LACT-sendDeepCopy
+        val RVclone = realView(myID).clone()
+        for (neighbor <- Roster)
+        {
+          val neighborActor = "../"+neighbor.toString;
+          context.actorSelection(neighborActor) !  RVUpdate(myID,RVclone)
+          context.actorSelection(neighborActor) ! LACTupdate(myID,currentDCST) //currentDCST is a val i.e constant.
+        }
+      }
+      
+    case RVUpdate(senderID:Int, rv:ArrayBuffer[Int])=>
+      {
+        /*received real links created by neighbor
+         * update my real links view, I will only use information about links 
+         * to a shared neighbor*/
+        for (dst <-rv)
+        {
+          if (socialView.keySet.contains(dst))
+            realView(senderID)+=dst;
+          // TBR------------------------------------- My picture of realview only tells me about real links
+          // so when calculating excess it might be hard to identify nodes which are heavily loaded.
+        }
+      }
+    case LACTupdate(senderID:Int,lact:ArrayBuffer[edge])=>
+      {
+        /* neighbors dcst recvd,based on it I might create a few links requested by the neighbor
+         * simple policy-- if realLinks I have created are less than degree_constraint I will 
+         * create new links else I will ignore the request.*/
+        for (e<-lact)
+        {
+          if (e.src == myID && realView(myID).size < degree_constraint) // sender wants me to create this link for him.
+            realView(myID)+=e.dst;
+          if (e.dst == myID) // In practice this wont be required, as links are bi-directional--i.e. con_req will result in a bi-directional link.
+            realView(myID)+=e.src
+          
+        }
+        /* Since real view is updated let others know*/
+        //----------------------------------------------------- TBR
+        // should I update others about realView here or after LACT has been calculated.
+      }
     case RosterExchange(sender:Int,neighborRoster:ArrayBuffer[Int])=>
       {
         //Initially only interested in links to shared neighbours.
@@ -96,7 +164,6 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
           if (socialView.keySet.contains(target))
           {
             socialView(sender)+=target;
-            System.out.println("recvd Roster msg");
           }
           
         }
@@ -122,11 +189,11 @@ object SmartTopology
 {
   def main(args:Array[String])
   {
-    if (args.length<2)
+    if (args.length<1)
       println("Please enter the name of Graph file.")
     else
     {
-      val GraphFile = args(1);
+      val GraphFile = args(0);
       val actor_system = ActorSystem("SmartTopology")
       val nodesInNetwork = new ArrayBuffer[ActorRef]();
       // Read the file , initialize the nodes.
