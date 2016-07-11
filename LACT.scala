@@ -57,9 +57,7 @@ class LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
             {
               selectedAction = current_automaton.selectAction();
               SpanningTree+=(selectedAction.sel_edge);
-              println("added to spanning tree")
               CostTree = CostTree+selectedAction.sel_cost;
-              println("updated cost of tree is "+ CostTree);
               verticesInTree+=selectedAction.sel_edge.dst->true;
               treeTraceList.push(AutomatonTable(selectedAction.sel_edge.dst))
               action_probability+=selectedAction.action_prob;
@@ -73,7 +71,6 @@ class LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
                 while (!treeTraceList.isEmpty)
                 {
                   var candidateAutomaton = treeTraceList.pop();
-                  println("poppped "+ candidateAutomaton.id)
                   candidateAutomaton.cycleAvoidance(verticesInTree);
                   if (candidateAutomaton.validateActionSet()==true)
                   {
@@ -91,9 +88,7 @@ class LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
               
               selectedAction = chosenAutomaton.selectAction();
               SpanningTree+=(selectedAction.sel_edge);
-              println("added to spanning tree")
               CostTree = CostTree+selectedAction.sel_cost;
-              println("updated cost of tree is "+ CostTree);
               verticesInTree+=selectedAction.sel_edge.dst->true;
               treeTraceList.push(AutomatonTable(selectedAction.sel_edge.dst))
               action_probability+=selectedAction.action_prob;
@@ -105,10 +100,10 @@ class LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
       {
         MinTreeCost = CostTree;
         BestTree = SpanningTree;
-        println("minimum cost tree")
+        
       }
-    println(CostTree)
-    println(MinTreeCost)
+    println("Iteration Tree Cost "+CostTree)
+    println("minimum cost tree is " + MinTreeCost);
     // after every iteration all automatons should be refreshed
     for (automatonID <- AutomatonTable.keySet)
     {
@@ -121,7 +116,7 @@ class LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
   def iterateTree(curr_vert_ID:Int):ArrayBuffer[edge]=
   {
     var counter = 0;
-    while (counter < 100)
+    while (counter < 10)
     {
       start(curr_vert_ID);
       counter = counter + 1;
@@ -165,6 +160,9 @@ object LACT_unitTest
           realView+=(src->store);
         }
       }
+    /*
+     * This part prints out the read in input link files
+     * 
     for (src <- socialView.keySet)
       {
         for (dst<-socialView(src))
@@ -176,9 +174,13 @@ object LACT_unitTest
         for (dst<-realView(src))
           println(src+"->"+dst);
       }
+      * */
     //class ViewSnapshot(socialView:HashMap[Int,ArrayBuffer[Int]],realView:HashMap[Int,ArrayBuffer[Int]])
      var mySnapshot = new ViewSnapshot(socialView,realView);
      var myLact = new LACT(1,mySnapshot,.2,5);
+     /* The below snippet prints out the snapshot sent as 
+      * input to LACT
+      * 
      for (src <- mySnapshot.snapshot.keySet)
      {
        for (e<-mySnapshot.snapshot(src))
@@ -186,6 +188,8 @@ object LACT_unitTest
          println(e.src,e.dst,e.cost,e.real);
        }
      }
+     * */
+     
     myLact.iterateTree(1);
     myLact.displaySpanningTree(true);
     }
