@@ -40,7 +40,7 @@ class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
   for (link <- view.snapshot(uid))
   {
     assignCosts(link);
-    actionSet+=(new ActionSet(link,costAction(link),true))
+    actionSet+=(new ActionSet(link,sum_costs/costAction(link),true))
   }
   
   def assignCosts(link:edge)=
@@ -51,11 +51,21 @@ class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
     }
     else
     {
-      var excess= 0;
-      // filter edges that are real, find sum-- for both source and dst of the link.
-      excess = excess+view.snapshot(link.src).filter(_.real==true).size
-      excess = excess+view.snapshot(link.dst).filter(_.real==true).size
-      costAction+=(link->(1+excess/degree_constraint)*link.cost)
+      var numRealLinksSrc = view.snapshot(link.src).filter(_.real==true).size;
+      var numRealLinksDst = view.snapshot(link.dst).filter(_.real==true).size;
+      if (numRealLinksSrc <= degree_constraint && numRealLinksDst <= degree_constraint)
+      {
+         
+          costAction+=(link->link.cost);
+      }
+      else
+      {
+         var excess= 0;
+          // filter edges that are real, find sum-- for both source and dst of the link.
+          excess = excess+numRealLinksSrc - degree_constraint
+          excess = excess+numRealLinksDst - degree_constraint
+          costAction+=(link->(1+excess/degree_constraint)*link.cost);
+      }
     }
   }
   
@@ -146,6 +156,13 @@ class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
     var choice = scala.util.Random.nextDouble();
     var selectedAction:ActionSet = null;
     var sum:Double = 0.0;
+    /* Print choice of avialable actions to validate that action being selected is the 
+     * one with low cost and high probability*/
+    println("--------ActionSet--------")
+    for (action <- actionSet)
+    {
+      println(action.link.src+"--->"+action.link.dst,action.action_prob,action.available,costAction(action.link),action.link.real)
+    }
     breakable {
         for (action <- actionSet)
         {
@@ -169,6 +186,7 @@ class Automaton (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
           }
         }
     }//breakable
+    println("break_prob :"+ sum + " Selected Action "+selectedAction.link.src+"-->"+selectedAction.link.dst,selectedAction.action_prob);
     var selected_prob = selectedAction.action_prob;
     var selected_edge_cost = costAction(selectedAction.link);
     scaleActionSet(false,action_sum = sum);
