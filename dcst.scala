@@ -10,6 +10,7 @@ import scala.io.Source
 case object start
 case object revaluate_socialTopo
 case object trigger_lact
+case object displayTopology
 case class RVUpdate(senderID:Int,RV:ArrayBuffer[Int])
 case class LACTupdate(senderID:Int,lact:ArrayBuffer[edge])
 // represents a link in the graph.
@@ -19,6 +20,11 @@ class edge(source:Int,target:Int,value:Double,trueLink:Boolean)
   val dst = target;
   var cost = value;
   var real = trueLink;
+  
+  def getString():String=
+  {
+    return "<"+src+"--->"+dst+":cost "+cost+" status: "+real+">";
+  }
 }
 /* This class represents unified view of the neighborhood, containing all information 
  * that would be needed by the DCST algorithm to work, each invocation of MinDCST
@@ -48,6 +54,57 @@ case class realDegree(num_links:Int)
 case class LinkAdvt(source:Int, target:Int)
 // Exchange Rosters with Friends
 case class RosterExchange(sender:Int,roster:ArrayBuffer[Int])
+
+/* Keeps track of the topology overtime */
+class Monitor(RosterFile:String) extends Actor
+{
+   var EdgeMap = new HashMap[Int,ArrayBuffer[edge]]()
+   for (line <- Source.fromFile(RosterFile).getLines())
+      {
+        val split_array = line.split(" ");
+        val src = split_array(0).toInt;
+        EdgeMap+=(src-> new ArrayBuffer[edge]())
+        for (i<- 1 to split_array.length-1)
+          EdgeMap(src)+=(new edge(src,split_array(i).toInt,0.0,false))
+      }
+  def receive=
+    {
+      case RVUpdate(senderID:Int, rv:ArrayBuffer[Int])=>
+        {
+          for (e<- EdgeMap(senderID))
+          {
+            if (rv.contains(e.dst))
+            {
+              e.real = true;
+            }
+          }
+        }
+      case `displayTopology`=>
+        {
+          for (src <- EdgeMap.keySet)
+          {
+            println("------------------ "+src+" ----------------------")
+            var SB = new StringBuilder();
+            for (e<-EdgeMap(src))
+            {
+              SB.append(e.getString())
+              SB.append(" ");
+            }
+            println(SB);
+            println("-----------real/social--------------")
+            println(EdgeMap(src).filter { _.real}.size.toFloat/EdgeMap(src).size)
+          }
+        }
+      case `start`=>
+        {
+          /* schedule periodic displays*/
+          val Asys = context.system;
+          import Asys.dispatcher;
+          Asys.scheduler.schedule(new FiniteDuration(120,SECONDS),new FiniteDuration(120,SECONDS),self,displayTopology)
+        }
+    }
+}
+
 /* A node is an independent network gateway*/
 class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
 {
@@ -66,6 +123,7 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
   for (neighbor <- Roster)
   {
      socialView+=(neighbor->new ArrayBuffer[Int]()); // Adjacency list for neighbors
+     realView+=(neighbor->new ArrayBuffer[Int]()); // realView for neighbors
      socialView(uid)+=neighbor; // Adjacency list for root node.
   }    
   def receive = 
@@ -123,6 +181,9 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
           context.actorSelection(neighborActor) !  RVUpdate(myID,RVclone)
           context.actorSelection(neighborActor) ! LACTupdate(myID,currentDCST) //currentDCST is a val i.e constant.
         }
+        /* Inform monitor about changes in the topology*/
+        val monitor = "../"+"monitor";
+        context.actorSelection(monitor) !  RVUpdate(myID,RVclone)
       }
       
     case RVUpdate(senderID:Int, rv:ArrayBuffer[Int])=>
@@ -132,7 +193,7 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
          * to a shared neighbor*/
         for (dst <-rv)
         {
-          if (socialView.keySet.contains(dst))
+          if (socialView.keySet.contains(dst) && !realView(senderID).contains(dst))
             realView(senderID)+=dst;
           // TBR------------------------------------- My picture of realview only tells me about real links
           // so when calculating excess it might be hard to identify nodes which are heavily loaded.
@@ -161,11 +222,10 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
         // Add to local view a relevant link.
         for (target<-neighborRoster)
         {
-          if (socialView.keySet.contains(target))
+          if (socialView.keySet.contains(target) && !socialView(sender).contains(target)) //fix duplicate additions
           {
             socialView(sender)+=target;
-          }
-          
+          }         
         }
       }
   }
@@ -206,8 +266,10 @@ object SmartTopology
           roster+=(split_array(i).toInt)
         nodesInNetwork+=actor_system.actorOf(Props(new Node(src,roster)),src.toString());
       }
+      val monitor = actor_system.actorOf(Props(new Monitor(GraphFile)),"monitor")
       val Manager = actor_system.actorOf(Props(new SimulationManager(nodesInNetwork)),"Manager")
       Manager ! start;
+      monitor ! start;
     }
   }
 }
