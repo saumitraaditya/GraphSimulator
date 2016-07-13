@@ -12,6 +12,7 @@ case object revaluate_socialTopo
 case object trigger_lact
 case object displayTopology
 case class RVUpdate(senderID:Int,RV:ArrayBuffer[Int])
+case class RVUpdateNeg(senderID:Int,TrLinks:ArrayBuffer[Int])
 case class LACTupdate(senderID:Int,lact:ArrayBuffer[edge])
 // represents a link in the graph.
 class edge(source:Int,target:Int,value:Double,trueLink:Boolean)
@@ -109,7 +110,8 @@ class Monitor(RosterFile:String) extends Actor
 class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
 {
   val myID = uid;
-  val degree_constraint = 5;
+  val degree_constraint = 2;
+  var CostPrevTree:Double = Double.MaxValue;
   /* will contain social links*/
   var socialView = new HashMap[Int,ArrayBuffer[Int]](){ override def default(key:Int) = new ArrayBuffer[Int] }
   /* will contain actual links, needs to be updates when new links are created by self, or information about
@@ -164,26 +166,32 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
         var myLact = new LACT(1,timedShot,.2,5);
         val currentDCST:ArrayBuffer[edge] = myLact.iterateTree(myID);
         myLact.displaySpanningTree(true);
-        //updating realView
-        for (e<-currentDCST)
+        var costCurrentTree = myLact.getCost();
+        if (costCurrentTree < CostPrevTree)
         {
-          if (e.src == myID)
-          {
-            realView(myID)+=e.dst;
-          }
+            // updatePrevCost
+            CostPrevTree = costCurrentTree;
+            //updating realView
+            for (e<-currentDCST)
+            {
+              if (e.src == myID && !realView(myID).contains(e.dst))
+              {
+                realView(myID)+=e.dst;
+              }
+            }
+            //disseminate realView-sendDeepCopy
+            //disseminate LACT-sendDeepCopy
+            val RVclone = realView(myID).clone()
+            for (neighbor <- Roster)
+            {
+              val neighborActor = "../"+neighbor.toString;
+              context.actorSelection(neighborActor) !  RVUpdate(myID,RVclone)
+              context.actorSelection(neighborActor) ! LACTupdate(myID,currentDCST) //currentDCST is a val i.e constant.
+            }
+            /* Inform monitor about changes in the topology*/
+            val monitor = "../"+"monitor";
+            context.actorSelection(monitor) !  RVUpdate(myID,RVclone)
         }
-        //disseminate realView-sendDeepCopy
-        //disseminate LACT-sendDeepCopy
-        val RVclone = realView(myID).clone()
-        for (neighbor <- Roster)
-        {
-          val neighborActor = "../"+neighbor.toString;
-          context.actorSelection(neighborActor) !  RVUpdate(myID,RVclone)
-          context.actorSelection(neighborActor) ! LACTupdate(myID,currentDCST) //currentDCST is a val i.e constant.
-        }
-        /* Inform monitor about changes in the topology*/
-        val monitor = "../"+"monitor";
-        context.actorSelection(monitor) !  RVUpdate(myID,RVclone)
       }
       
     case RVUpdate(senderID:Int, rv:ArrayBuffer[Int])=>
@@ -207,9 +215,15 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
         for (e<-lact)
         {
           if (e.src == myID && realView(myID).size < degree_constraint) // sender wants me to create this link for him.
-            realView(myID)+=e.dst;
+            {
+              if (!realView(myID).contains(e.dst))
+                realView(myID)+=e.dst;
+            }
           if (e.dst == myID) // In practice this wont be required, as links are bi-directional--i.e. con_req will result in a bi-directional link.
-            realView(myID)+=e.src
+            {
+              if (!realView(myID).contains(e.src))
+                realView(myID)+=e.src
+            }
           
         }
         /* Since real view is updated let others know*/
