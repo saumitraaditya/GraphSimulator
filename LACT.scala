@@ -28,8 +28,11 @@ class LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
   {
     var displayString = new StringBuilder();
     if (BestSpanningTree)
-      for (this_edge<-BestTree)
-        displayString.append(" %d-->%d ".format(this_edge.src,this_edge.dst));
+      {
+        for (this_edge<-BestTree)
+          displayString.append(" %d-->%d ".format(this_edge.src,this_edge.dst));
+        displayString.append("<< %f >>".format(MinTreeCost));
+      }
     else
       for (this_edge<-SpanningTree)
         displayString.append(" %d-->%d ".format(this_edge.src,this_edge.dst));
@@ -102,8 +105,8 @@ class LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
         BestTree = SpanningTree;
         
       }
-    println("Iteration Tree Cost "+CostTree)
-    println("minimum cost tree is " + MinTreeCost);
+    //println("Iteration Tree Cost "+CostTree)
+    //println("minimum cost tree is " + MinTreeCost);
     // after every iteration all automatons should be refreshed
     for (automatonID <- AutomatonTable.keySet)
     {
@@ -123,6 +126,11 @@ class LACT (uid:Int,view:ViewSnapshot,reward_val:Double,deg_constraint:Int)
     }
     return BestTree;
   }
+  
+  def getCost():Double=
+    {
+      return MinTreeCost;
+    }
   
 }
 
