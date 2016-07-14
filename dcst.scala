@@ -14,6 +14,8 @@ case object displayTopology
 case class RVUpdate(senderID:Int,RV:ArrayBuffer[Int])
 case class RVUpdateNeg(senderID:Int,TrLinks:ArrayBuffer[Int])
 case class LACTupdate(senderID:Int,lact:ArrayBuffer[edge])
+case class con_req(senderId:Int)
+case class con_ack(senderID:Int)
 // represents a link in the graph.
 class edge(source:Int,target:Int,value:Double,trueLink:Boolean)
 {
@@ -95,6 +97,24 @@ class Monitor(RosterFile:String) extends Actor
             println("-----------real/social--------------")
             println(EdgeMap(src).filter { _.real}.size.toFloat/EdgeMap(src).size)
           }
+          
+          println("------------------ "+"FILE"+" ----------------------")
+          for (src <- EdgeMap.keySet)
+          {          
+            var SB_file = new StringBuilder();
+            SB_file.append(src+" ");
+            for (e<-EdgeMap(src))
+            {
+              if (e.real == true)
+              {
+                SB_file.append(e.dst)
+                SB_file.append(" ");
+              }
+            }
+            println(SB_file)
+          }
+          
+          
         }
       case `start`=>
         {
@@ -110,7 +130,7 @@ class Monitor(RosterFile:String) extends Actor
 class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
 {
   val myID = uid;
-  val degree_constraint = 2;
+  val degree_constraint = 4;
   var CostPrevTree:Double = Double.MaxValue;
   /* will contain social links*/
   var socialView = new HashMap[Int,ArrayBuffer[Int]](){ override def default(key:Int) = new ArrayBuffer[Int] }
@@ -139,7 +159,7 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
       {
         val Asys = context.system;
         import Asys.dispatcher;
-        Asys.scheduler.schedule(new FiniteDuration(1,SECONDS),new FiniteDuration(5,SECONDS),self,revaluate_socialTopo)
+        Asys.scheduler.schedule(new FiniteDuration(1,SECONDS),new FiniteDuration(20,SECONDS),self,revaluate_socialTopo)
         Asys.scheduler.schedule(new FiniteDuration(10,SECONDS),new FiniteDuration(60,SECONDS),self,trigger_lact)
       }
     case `revaluate_socialTopo`=>
@@ -147,11 +167,16 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
         /*Simplified implementation -- send my roster to nodes in my roster.*/
         // create a deep copy of Roster and send it across
         val rosterCopy = Roster.clone();
+        val RVclone = realView(myID).clone()
         for (neighbor <- Roster)
         {
           val neighborActor = "../"+neighbor.toString;
-          context.actorSelection(neighborActor) ! RosterExchange(uid,rosterCopy)   
+          context.actorSelection(neighborActor) ! RosterExchange(uid,rosterCopy)
+          context.actorSelection(neighborActor) !  RVUpdate(myID,RVclone)
         }
+         /* Inform monitor about changes in the topology*/
+          val monitor = "../"+"monitor";
+          context.actorSelection(monitor) !  RVUpdate(myID,RVclone)
       }
     case `trigger_lact` =>
       {
@@ -176,21 +201,17 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
             {
               if (e.src == myID && !realView(myID).contains(e.dst))
               {
-                realView(myID)+=e.dst;
+                //send con_req to dst
+                val requestTo = "../"+e.dst.toString;
+                context.actorSelection(requestTo) !  con_req(myID)
               }
             }
-            //disseminate realView-sendDeepCopy
             //disseminate LACT-sendDeepCopy
-            val RVclone = realView(myID).clone()
             for (neighbor <- Roster)
             {
               val neighborActor = "../"+neighbor.toString;
-              context.actorSelection(neighborActor) !  RVUpdate(myID,RVclone)
-              context.actorSelection(neighborActor) ! LACTupdate(myID,currentDCST) //currentDCST is a val i.e constant.
+              context.actorSelection(neighborActor) ! LACTupdate(myID,currentDCST.clone) //currentDCST is a val i.e constant.
             }
-            /* Inform monitor about changes in the topology*/
-            val monitor = "../"+"monitor";
-            context.actorSelection(monitor) !  RVUpdate(myID,RVclone)
         }
       }
       
@@ -217,14 +238,12 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
           if (e.src == myID && realView(myID).size < degree_constraint) // sender wants me to create this link for him.
             {
               if (!realView(myID).contains(e.dst))
-                realView(myID)+=e.dst;
+                {
+                  // Initiate con_req to create a link on behalf of the requestor
+                  val requestTo = "../"+e.dst.toString;
+                  context.actorSelection(requestTo) !  con_req(myID)
+                }
             }
-          if (e.dst == myID) // In practice this wont be required, as links are bi-directional--i.e. con_req will result in a bi-directional link.
-            {
-              if (!realView(myID).contains(e.src))
-                realView(myID)+=e.src
-            }
-          
         }
         /* Since real view is updated let others know*/
         //----------------------------------------------------- TBR
@@ -240,6 +259,24 @@ class Node(val uid:Int, var Roster:ArrayBuffer[Int]) extends Actor
           {
             socialView(sender)+=target;
           }         
+        }
+      }
+    case con_req(senderId:Int)=>
+      {
+        /*Con req recvd , act on it based on POLICY*/
+        if (realView(myID).size < degree_constraint && !realView(myID).contains(senderId))
+        {
+             //I will create this link, send ack to sender
+            realView(myID)+=senderId;
+            val requestor = "../"+senderId.toString;
+            context.actorSelection(requestor) !  con_ack(myID)       
+        }
+      }
+    case con_ack(senderID:Int)=>
+      {
+        if (!realView(myID).contains(senderID))
+        {
+          realView(myID)+=senderID
         }
       }
   }
